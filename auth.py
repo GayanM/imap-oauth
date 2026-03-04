@@ -5,29 +5,37 @@ import webbrowser
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from config import CLIENT_ID, CLIENT_SECRET, AUTHORITY, REDIRECT_URI, SCOPES
+from config import CLIENT_ID, AUTHORITY, REDIRECT_URI, SCOPES
 
-auth_code = None
+redirect_result = None
 
 
 class AuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global auth_code
+        global redirect_result
 
-        params = parse_qs(urlparse(self.path).query)
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
 
-        if "code" in params:
-            auth_code = params["code"][0]
+        # Capture full redirect response (code + state)
+        redirect_result = {
+            "code": params.get("code", [None])[0],
+            "state": params.get("state", [None])[0]
+        }
+
+        if redirect_result["code"]:
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"Login successful. You may close this window.")
         else:
             self.send_response(400)
             self.end_headers()
+            self.wfile.write(b"Authorization failed.")
 
 
 def get_access_token():
-    global auth_code
+    global redirect_result
+    redirect_result = None
 
     def start_server():
         server = HTTPServer(("localhost", 8000), AuthHandler)
@@ -37,29 +45,31 @@ def get_access_token():
     server_thread = threading.Thread(target=start_server)
     server_thread.start()
 
-    app = msal.ConfidentialClientApplication(
+    app = msal.PublicClientApplication(
         CLIENT_ID,
-        authority=AUTHORITY,
-        client_credential=CLIENT_SECRET
+        authority=AUTHORITY
     )
 
-    auth_url = app.get_authorization_request_url(
-        SCOPES,
+    # PKCE handled automatically
+    flow = app.initiate_auth_code_flow(
+        scopes=SCOPES,
         redirect_uri=REDIRECT_URI
     )
+
+    auth_url = flow["auth_uri"]
 
     print("Opening browser for login...")
     webbrowser.open(auth_url)
 
     server_thread.join()
 
-    if not auth_code:
-        raise Exception("Failed to capture authorization code")
+    if not redirect_result or not redirect_result.get("code"):
+        raise Exception("Failed to capture authorization response")
 
-    result = app.acquire_token_by_authorization_code(
-        auth_code,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
+    # MSAL validates state + PKCE automatically
+    result = app.acquire_token_by_auth_code_flow(
+        flow,
+        redirect_result
     )
 
     if "access_token" not in result:

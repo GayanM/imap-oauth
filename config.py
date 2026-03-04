@@ -1,6 +1,4 @@
-import os
 CLIENT_ID = "2fb1dba6-1ae4-45c8-afde-7ca13ac98828"
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = "bbe6a94b-d23b-42c4-b138-c00c3d953765"
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
